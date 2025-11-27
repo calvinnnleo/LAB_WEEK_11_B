@@ -1,0 +1,223 @@
+ASSIGNMENT - LAB WEEK 11
+Nama: CalvinLeo
+NIM: 00000098707
+
+========================================================================================
+QUESTION 1:
+When a user takes a picture, that picture is stored in a path based on the given URI. 
+In which part of the code handles this? (Copy that part of the code as the answer)
+
+ANSWER:
+Bagian kode yang menangani penyimpanan gambar ada di MainActivity.kt:
+
+takePictureLauncher =
+    registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            providerFileManager.insertImageToStore(photoInfo)
+            Toast.makeText(this, "Photo saved to gallery!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+Dan implementasi penyimpanan di ProviderFileManager.kt:
+
+private fun insertToStore(
+    fileInfo: FileInfo,
+    contentUri: Uri,
+    contentValues: ContentValues
+) {
+    executor.execute {
+        val insertedUri = contentResolver.insert(contentUri, contentValues)
+        insertedUri?.let {
+            val inputStream = contentResolver.openInputStream(fileInfo.uri)
+            val outputStream = contentResolver.openOutputStream(insertedUri)
+            IOUtils.copy(inputStream, outputStream)
+            inputStream?.close()
+            outputStream?.close()
+        }
+    }
+}
+
+========================================================================================
+QUESTION 2:
+In your FileInfo.kt, there are 5 attributes. On the first attribute, what does the URI 
+refer to? And on the fourth attribute, what does relativePath refer to?
+
+ANSWER:
+
+First Attribute - uri: Uri
+URI ini merujuk pada temporary URI yang dihasilkan oleh FileProvider untuk mengakses 
+file di external storage. URI ini bersifat sementara dan memberikan akses terbatas 
+kepada aplikasi kamera untuk menulis file ke lokasi yang ditentukan. URI ini dibuat 
+melalui FileProvider.getUriForFile() di class FileHelper.
+
+Contoh URI: 
+content://com.example.lab_week_11_b.camera/photos/img_1234567890.jpg
+
+Fungsi: Memberikan akses temporary kepada aplikasi kamera untuk menyimpan foto/video 
+ke lokasi yang sudah ditentukan tanpa memberikan akses penuh ke seluruh storage.
+
+Fourth Attribute - relativePath: String
+relativePath merujuk pada jalur relatif folder di external storage tempat file akan 
+disimpan di MediaStore. Untuk gambar nilainya adalah Environment.DIRECTORY_PICTURES 
+("Pictures"), dan untuk video adalah Environment.DIRECTORY_MOVIES ("Movies"). 
+
+Path ini digunakan oleh MediaStore di Android 10+ (API 29+) untuk mengorganisir file 
+di storage publik sesuai dengan kategori file nya.
+
+Contoh relativePath:
+- Untuk foto: "Pictures"
+- Untuk video: "Movies"
+
+Fungsi: Menentukan folder tujuan di MediaStore agar file tersimpan di kategori yang 
+benar dan dapat diakses oleh aplikasi Gallery atau file manager.
+
+========================================================================================
+QUESTION 3 (BONUS):
+Explain the chronological order from when a user takes a picture until the file is 
+stored in the MediaStore.
+
+ANSWER:
+
+URUTAN KRONOLOGIS PENGAMBILAN DAN PENYIMPANAN FOTO:
+
+1. USER INTERACTION - User menekan tombol "Take Photo"
+   - Button onClick listener dipanggil
+   - Flag isCapturingVideo di-set ke false
+   - Method checkStoragePermission() dipanggil
+
+2. PERMISSION CHECK
+   - Untuk Android 9 (API 28) ke bawah:
+     * Cek permission WRITE_EXTERNAL_STORAGE
+     * Jika belum granted, request permission
+     * Jika sudah granted, lanjut ke step 3
+   - Untuk Android 10+ (API 29+):
+     * Permission tidak diperlukan (Scoped Storage)
+     * Langsung lanjut ke step 3
+
+3. GENERATE FILE INFO & URI
+   - Method openImageCapture() dipanggil
+   - ProviderFileManager.generatePhotoUri(timestamp) membuat objek FileInfo:
+     * name: "img_[timestamp].jpg"
+     * file: File object di getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+     * uri: Temporary URI dari FileProvider.getUriForFile()
+     * relativePath: Environment.DIRECTORY_PICTURES ("Pictures")
+     * mimeType: "image/jpeg"
+   - FileInfo disimpan ke variabel photoInfo
+
+4. LAUNCH CAMERA
+   - takePictureLauncher.launch(photoInfo.uri) dipanggil
+   - Android membuka aplikasi kamera default
+   - Camera app mendapat temporary permission untuk write ke URI tersebut
+   - URI yang diberikan: content://com.example.lab_week_11_b.camera/photos/img_xxx.jpg
+
+5. CAPTURE PHOTO
+   - User mengambil foto dengan menekan shutter button
+   - Camera app menyimpan image data ke URI yang diberikan
+   - File tersimpan di: /storage/emulated/0/Android/data/com.example.lab_week_11_b/files/Pictures/
+   - Camera app menutup dan mengembalikan result success = true
+
+6. RECEIVE RESULT
+   - takePictureLauncher callback dipanggil dengan parameter success
+   - Jika success == true:
+     * providerFileManager.insertImageToStore(photoInfo) dipanggil
+     * Toast notification ditampilkan
+
+7. INSERT TO MEDIASTORE - Background Thread Execution
+   - Method insertImageToStore() memanggil insertToStore()
+   - Executor.execute() menjalankan operasi I/O di background thread:
+   
+   a. Create MediaStore Entry:
+      - contentResolver.insert(MediaStore.Images.Media.URI, contentValues)
+      - ContentValues berisi: DISPLAY_NAME, RELATIVE_PATH, MIME_TYPE
+      - MediaStore membuat entry baru dan return insertedUri
+   
+   b. Copy File Data:
+      - InputStream dibuka dari fileInfo.uri (temporary file)
+      - OutputStream dibuka dari insertedUri (MediaStore location)
+      - IOUtils.copy(inputStream, outputStream) menyalin byte data
+      - Semua stream ditutup (close)
+   
+   c. MediaStore Update:
+      - MediaStore secara otomatis mengindex file baru
+      - File sekarang visible di Gallery apps
+      - Thumbnail di-generate oleh sistem
+
+8. COMPLETION
+   - File tersimpan di 2 lokasi:
+     * App-specific storage (temporary): /Android/data/.../files/Pictures/
+     * MediaStore (permanent): /storage/emulated/0/Pictures/
+   - Gallery app dapat menampilkan foto
+   - File dapat diakses oleh aplikasi lain melalui MediaStore
+   - User melihat toast: "Photo saved to gallery!"
+
+DIAGRAM ALUR:
+┌─────────────┐
+│ User Click  │
+│   Button    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Permission  │
+│    Check    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Generate   │
+│ FileInfo &  │
+│     URI     │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│   Launch    │
+│   Camera    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│    User     │
+│  Take Photo │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Save to    │
+│ Temp File   │
+│  via URI    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Callback   │
+│   Success   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│   Insert    │
+│     to      │
+│ MediaStore  │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│   Visible   │
+│ in Gallery  │
+└─────────────┘
+
+KEY COMPONENTS INVOLVED:
+- FileProvider: Menyediakan temporary URI untuk camera access
+- ActivityResultContracts.TakePicture: Contract untuk capture foto
+- ContentResolver: Interface untuk akses MediaStore
+- MediaStore: Database sistem untuk media files
+- IOUtils: Library untuk copy stream data
+- Executor: Background thread untuk I/O operations
+
+CATATAN PENTING:
+- File disimpan 2x: di app-specific storage (backup) dan MediaStore (public)
+- Temporary URI dari FileProvider mencegah camera app akses full storage
+- Background thread digunakan untuk I/O agar tidak block UI thread
+- MediaStore otomatis handle indexing dan thumbnail generation
+- Untuk video prosesnya sama, hanya berbeda MIME type dan folder destination
